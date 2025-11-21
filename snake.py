@@ -1,4 +1,4 @@
-import pygame, sys, random, time
+import pygame, sys, random, time, os
 
 # 颜色初始化
 black = pygame.Color(0, 0, 0)
@@ -19,7 +19,7 @@ else:
     print('[+] game initialising successfully!')
 
 # 设置窗口及其信息
-pygame.display.set_caption('snake')
+pygame.display.set_caption('Snake Game')
 window = pygame.display.set_mode(windows_size)
 
 # 设置fps
@@ -48,29 +48,21 @@ next_pos = direction
 # 分数
 score = 0
 
-# game over
-def game_over():
-    over_font = pygame.font.SysFont('times new roman', 45)
-    over_rder = over_font.render('Suck My Dick!', True, red)
-    over_rect = over_rder.get_rect()
-    over_rect.midtop = (windows_size[0] / 2, windows_size[1] / 2)
-    window.fill(black)
-    window.blit(over_rder, over_rect)
-    show_score()
-    pygame.display.flip()
-    time.sleep(2)
-    pygame.quit()
-    sys.exit()
+# 跨平台字体加载
+def get_font(size):
+    # 尝试加载系统字体，跨平台兼容
+    try:
+        if os.name == 'nt':  # Windows
+            return pygame.font.SysFont('times new roman', size)
+        else:  # Linux/Mac
+            return pygame.font.SysFont('Arial', size)
+    except:
+        # 如果系统字体加载失败，使用默认字体
+        return pygame.font.Font(None, size)
 
-# show score
-def show_score():
-    score_font = pygame.font.SysFont('times', 20)
-    score_rder = score_font.render('Dicks: ' + str(score), True, white)
-    score_rect = score_rder.get_rect()
-    score_rect.midtop = (windows_size[0] / 10, 15)
-    window.blit(score_rder, score_rect)
-
-while True:
+# 跨平台事件处理
+def handle_events():
+    global direction
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
@@ -87,6 +79,32 @@ while True:
                 direction = 'RIGHT'
             if event.key == pygame.K_ESCAPE:
                 pygame.event.post(pygame.event.Event(pygame.QUIT))
+
+# game over
+def game_over():
+    over_font = get_font(45)
+    over_rder = over_font.render('Game Over!', True, red)
+    over_rect = over_rder.get_rect()
+    over_rect.midtop = (windows_size[0] / 2, windows_size[1] / 2)
+    window.fill(black)
+    window.blit(over_rder, over_rect)
+    show_score()
+    pygame.display.flip()
+    time.sleep(2)
+    pygame.quit()
+    sys.exit()
+
+# show score
+def show_score():
+    score_font = get_font(20)
+    score_rder = score_font.render('Score: ' + str(score), True, white)
+    score_rect = score_rder.get_rect()
+    score_rect.midtop = (windows_size[0] / 10, 15)
+    window.blit(score_rder, score_rect)
+
+# 游戏主循环
+while True:
+    handle_events()
     
     # 检测是否更新新位置 - 移到事件循环外
     if direction == 'UP' and next_pos != 'DOWN':
