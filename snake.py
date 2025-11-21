@@ -30,8 +30,10 @@ window = pygame.display.set_mode(windows_size)
 # 设置fps
 fps = pygame.time.Clock()
 
-# 设置速度
-speed = 10
+# 设置速度 - 初始速度稍慢，便于操作
+speed = 8
+# 增加速度的阈值
+speed_increase_threshold = 5
 
 # 设置蛇方块大小 - 增大方块大小
 body_size = 15
@@ -45,10 +47,14 @@ food_pos = [random.randrange(0, windows_size[0] // body_size) * body_size,
 # FOOD FLAG
 food_flag = True
 
-# 方向
-direction = 'RIGHT'
+# 方向 - 使用数字表示方向，便于处理
+UP = 0
+DOWN = 1
+LEFT = 2
+RIGHT = 3
+direction = RIGHT
 # head下一个位置方向
-next_pos = direction
+next_direction = RIGHT
 
 # 分数
 score = 0
@@ -56,6 +62,26 @@ score = 0
 # 游戏状态
 game_started = False
 game_paused = False
+
+# 蛇移动计时器
+move_timer = 0
+move_delay = 100  # 初始移动延迟（毫秒）
+
+# 蛇移动平滑度
+snake_trail = []  # 存储蛇的移动轨迹
+trail_length = 3  # 轨迹长度
+smooth_factor = 0.3  # 平滑因子
+
+# 游戏速度优化
+base_move_delay = 100  # 基础移动延迟
+min_move_delay = 40    # 最小移动延迟（最快速度）
+move_delay_reduction = 8  # 每次速度提升的延迟减少量
+speed_levels = 5       # 速度等级数量
+
+# 帧率优化
+target_fps = 60       # 目标帧率
+frame_skip = False     # 是否跳帧
+performance_mode = False  # 性能模式
 
 # 跨平台字体加载
 def get_font(size):
@@ -95,6 +121,14 @@ def draw_food():
 
 # 绘制蛇
 def draw_snake():
+    # 添加蛇头到轨迹
+    if len(snake_trail) == 0 or snake_trail[0] != head_pos:
+        snake_trail.insert(0, [head_pos[0], head_pos[1]])
+    
+    # 限制轨迹长度
+    while len(snake_trail) > trail_length:
+        snake_trail.pop()
+    
     for i, pos in enumerate(body_pos):
         # 计算渐变颜色
         if i == 0:  # 蛇头
@@ -105,13 +139,13 @@ def draw_snake():
             
             # 添加眼睛
             eye_size = 3
-            if direction == 'RIGHT':
+            if direction == RIGHT:
                 eye1_pos = (pos[0] + body_size - 5, pos[1] + 4)
                 eye2_pos = (pos[0] + body_size - 5, pos[1] + body_size - 7)
-            elif direction == 'LEFT':
+            elif direction == LEFT:
                 eye1_pos = (pos[0] + 5, pos[1] + 4)
                 eye2_pos = (pos[0] + 5, pos[1] + body_size - 7)
-            elif direction == 'UP':
+            elif direction == UP:
                 eye1_pos = (pos[0] + 4, pos[1] + 5)
                 eye2_pos = (pos[0] + body_size - 7, pos[1] + 5)
             else:  # DOWN
@@ -131,6 +165,19 @@ def draw_snake():
             # 绘制圆角矩形
             rect = pygame.Rect(pos[0], pos[1], body_size, body_size)
             pygame.draw.rect(window, color, rect, border_radius=2)
+            
+            # 添加平滑过渡效果
+            if i < len(body_pos) - 1:
+                next_pos = body_pos[i+1]
+                # 计算连接点
+                if i < len(snake_trail):
+                    # 使用轨迹进行平滑过渡
+                    trail_pos = snake_trail[min(i, len(snake_trail)-1)]
+                    # 绘制连接部分
+                    pygame.draw.line(window, color, 
+                                    (pos[0] + body_size // 2, pos[1] + body_size // 2),
+                                    (next_pos[0] + body_size // 2, next_pos[1] + body_size // 2), 
+                                    body_size - 2)
 
 # 绘制游戏开始界面
 def draw_start_screen():
@@ -146,7 +193,7 @@ def draw_start_screen():
     control_text1 = control_font.render('Use Arrow Keys or WASD to Move', True, white)
     control_rect1 = control_text1.get_rect(center=(windows_size[0] // 2, windows_size[1] * 2 // 3))
     
-    control_text2 = control_font.render('Press ESC to Quit', True, white)
+    control_text2 = control_font.render('Press P to Pause, ESC to Quit', True, white)
     control_rect2 = control_text2.get_rect(center=(windows_size[0] // 2, windows_size[1] * 3 // 4))
     
     window.fill(black)
@@ -163,7 +210,7 @@ def draw_pause_screen():
     pause_rect = pause_text.get_rect(center=(windows_size[0] // 2, windows_size[1] // 2))
     
     resume_font = get_font(25)
-    resume_text = resume_font.render('Press SPACE to Resume', True, white)
+    resume_text = resume_font.render('Press P to Resume', True, white)
     resume_rect = resume_text.get_rect(center=(windows_size[0] // 2, windows_size[1] * 2 // 3))
     
     window.blit(pause_text, pause_rect)
@@ -172,7 +219,7 @@ def draw_pause_screen():
 
 # 跨平台事件处理
 def handle_events():
-    global direction, game_started, game_paused
+    global direction, next_direction, game_started, game_paused, performance_mode
     
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -184,21 +231,70 @@ def handle_events():
                 if event.key == pygame.K_SPACE:
                     game_started = True
             elif game_paused:
-                if event.key == pygame.K_SPACE:
+                if event.key == pygame.K_p or event.key == pygame.K_SPACE:
                     game_paused = False
             else:
+                # 方向控制 - 改进为更响应的控制
                 if event.key == pygame.K_UP or event.key == ord('w'):
-                    direction = 'UP'
+                    if direction != DOWN:
+                        next_direction = UP
                 if event.key == pygame.K_DOWN or event.key == ord('s'):
-                    direction = 'DOWN'
+                    if direction != UP:
+                        next_direction = DOWN
                 if event.key == pygame.K_LEFT or event.key == ord('a'):
-                    direction = 'LEFT'
+                    if direction != RIGHT:
+                        next_direction = LEFT
                 if event.key == pygame.K_RIGHT or event.key == ord('d'):
-                    direction = 'RIGHT'
-                if event.key == pygame.K_SPACE:
+                    if direction != LEFT:
+                        next_direction = RIGHT
+                if event.key == pygame.K_p:
                     game_paused = True
                 if event.key == pygame.K_ESCAPE:
                     pygame.event.post(pygame.event.Event(pygame.QUIT))
+                # 性能模式切换
+                if event.key == pygame.K_F1:
+                    performance_mode = not performance_mode
+                    print(f"Performance mode: {'ON' if performance_mode else 'OFF'}")
+
+# 移动蛇
+def move_snake():
+    global direction, head_pos, move_timer, move_delay, snake_trail, food_flag, score
+    
+    # 更新方向
+    direction = next_direction
+    
+    # 计算新头部位置
+    new_head_pos = [body_pos[0][0], body_pos[0][1]]  # 复制当前位置
+    
+    if direction == UP:
+        new_head_pos[1] -= body_size
+    elif direction == DOWN:
+        new_head_pos[1] += body_size
+    elif direction == RIGHT:
+        new_head_pos[0] += body_size
+    elif direction == LEFT:
+        new_head_pos[0] -= body_size
+    
+    # 更新蛇头位置
+    body_pos.insert(0, new_head_pos)
+    head_pos = new_head_pos  # 更新head_pos引用
+    
+    # 检测蛇头是否与食物重合由此决定是否删除蛇尾巴
+    if head_pos[0] == food_pos[0] and head_pos[1] == food_pos[1]:
+        update_score()
+        food_flag = False
+        # 每吃一定数量的食物增加速度
+        if score % speed_increase_threshold == 0:
+            # 计算新的移动延迟，确保不会低于最小延迟
+            new_delay = max(min_move_delay, move_delay - move_delay_reduction)
+            move_delay = new_delay
+    else:
+        body_pos.pop()
+
+# 更新分数
+def update_score():
+    global score
+    score += 1
 
 # game over
 def game_over():
@@ -239,18 +335,21 @@ def game_over():
 
 # 重置游戏
 def reset_game():
-    global head_pos, body_pos, food_pos, food_flag, direction, next_pos, score, game_started, game_paused
+    global head_pos, body_pos, food_pos, food_flag, direction, next_direction, score, game_started, game_paused, move_delay, move_timer, snake_trail
     
     head_pos = [120, 60]
     body_pos = [[120, 60], [105, 60], [90, 60]] 
     food_pos = [random.randrange(0, windows_size[0] // body_size) * body_size, 
                random.randrange(0, windows_size[1] // body_size) * body_size]
     food_flag = True
-    direction = 'RIGHT'
-    next_pos = direction
+    direction = RIGHT
+    next_direction = RIGHT
     score = 0
     game_started = True
     game_paused = False
+    move_delay = base_move_delay  # 重置移动延迟
+    move_timer = 0  # 重置移动计时器
+    snake_trail = []  # 重置蛇轨迹
 
 # show score
 def show_score():
@@ -259,6 +358,13 @@ def show_score():
     score_rect = score_rder.get_rect()
     score_rect.topleft = (10, 10)
     window.blit(score_rder, score_rect)
+    
+    # 显示速度等级
+    speed_level = max(1, speed_levels - int((move_delay - min_move_delay) / (base_move_delay - min_move_delay) * speed_levels))
+    speed_text = score_font.render(f'Speed: {speed_level}/{speed_levels}', True, white)
+    speed_rect = speed_text.get_rect()
+    speed_rect.topleft = (10, 35)
+    window.blit(speed_text, speed_rect)
 
 # 游戏主循环
 while True:
@@ -274,39 +380,25 @@ while True:
         fps.tick(30)
         continue
     
-    # 检测是否更新新位置 - 移到事件循环外
-    if direction == 'UP' and next_pos != 'DOWN':
-        next_pos = 'UP'
-    elif direction == 'DOWN' and next_pos != 'UP':
-        next_pos = 'DOWN'
-    elif direction == 'LEFT' and next_pos != 'RIGHT':
-        next_pos = 'LEFT'
-    elif direction == 'RIGHT' and next_pos != 'LEFT':
-        next_pos = 'RIGHT'
+    # 获取自上一帧以来的时间（毫秒）
+    dt = fps.get_time()
+    move_timer += dt
     
-    # 更新位置 - 创建新的头部位置，避免引用问题
-    new_head_pos = [body_pos[0][0], body_pos[0][1]]  # 复制当前位置
-    if next_pos == 'UP':
-        new_head_pos[1] -= body_size
-    elif next_pos == 'DOWN':
-        new_head_pos[1] += body_size
-    elif next_pos == 'RIGHT':
-        new_head_pos[0] += body_size
-    elif next_pos == 'LEFT':
-        new_head_pos[0] -= body_size
+    # 只有当计时器超过移动延迟时才移动蛇
+    if move_timer >= move_delay:
+        move_snake()
+        move_timer = 0  # 重置计时器
+
+        # 碰撞检测-边界检测
+        if head_pos[0] < 0 or head_pos[0] >= windows_size[0]:
+            game_over()
+        if head_pos[1] < 0 or head_pos[1] >= windows_size[1]:
+            game_over()
+        # 碰撞检测-蛇体检测
+        if head_pos in body_pos[1:]:
+            game_over()
     
-    # 更新蛇头位置
-    body_pos.insert(0, new_head_pos)
-    head_pos = new_head_pos  # 更新head_pos引用
-    
-    # 检测蛇头是否与食物重合由此决定是否删除蛇尾巴
-    if head_pos[0] == food_pos[0] and head_pos[1] == food_pos[1]:
-        score += 1
-        food_flag = False
-    else:
-        body_pos.pop()
-        
-    # 更新食物位置
+    # 更新食物位置 - 移到主循环中，确保每帧都检查
     if not food_flag:
         while True:
             food_pos = [random.randrange(1, (windows_size[0]  - body_size)// body_size) * body_size, 
@@ -323,15 +415,6 @@ while True:
     draw_snake()
     # 绘制食物
     draw_food()
-
-    # 碰撞检测-边界检测
-    if head_pos[0] < 0 or head_pos[0] >= windows_size[0]:
-        game_over()
-    if head_pos[1] < 0 or head_pos[1] >= windows_size[1]:
-        game_over()
-    # 碰撞检测-蛇体检测
-    if head_pos in body_pos[1:]:
-        game_over()
     
     # 显示分数
     show_score()
@@ -339,5 +422,6 @@ while True:
     # 更新画面
     pygame.display.update()
     
-    # 更新频率(画面速度越快, 蛇速度越快)
-    fps.tick(speed)
+    # 根据性能模式调整帧率
+    current_fps = target_fps if not performance_mode else 30
+    fps.tick(current_fps)
