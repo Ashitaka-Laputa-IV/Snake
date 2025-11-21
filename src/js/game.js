@@ -13,7 +13,7 @@ const COLORS = {
 
 // 游戏窗口设置
 const WINDOW_WIDTH = 600;
-const WINDOW_HEIGHT = 400;
+const WINDOW_HEIGHT = 390;  // 修改为能被BODY_SIZE(15)整除的值，390/15=26
 
 // 游戏速度设置
 const INITIAL_SPEED = 8;
@@ -206,6 +206,13 @@ function moveSnake() {
         newHeadPos[0] -= BODY_SIZE;
     }
     
+    // 边界检测 - 在移动前检测，避免蛇头超出边界
+    if (newHeadPos[0] < 0 || newHeadPos[0] >= WINDOW_WIDTH || 
+        newHeadPos[1] < 0 || newHeadPos[1] >= WINDOW_HEIGHT) {
+        gameOver();
+        return;
+    }
+    
     // 更新蛇头位置
     bodyPos.unshift(newHeadPos);
     headPos = newHeadPos;  // 更新headPos引用
@@ -247,6 +254,7 @@ function drawGrid() {
     ctx.strokeStyle = COLORS.GRID_COLOR;
     ctx.lineWidth = 1;
     
+    // 绘制垂直线
     for (let x = 0; x <= WINDOW_WIDTH; x += BODY_SIZE) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
@@ -254,12 +262,34 @@ function drawGrid() {
         ctx.stroke();
     }
     
+    // 绘制水平线
     for (let y = 0; y <= WINDOW_HEIGHT; y += BODY_SIZE) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(WINDOW_WIDTH, y);
         ctx.stroke();
     }
+    
+    // 确保边界线清晰可见
+    ctx.strokeStyle = COLORS.GRID_COLOR;
+    ctx.lineWidth = 2;
+    
+    // 绘制外边框
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(WINDOW_WIDTH, 0);
+    ctx.lineTo(WINDOW_WIDTH, WINDOW_HEIGHT);
+    ctx.lineTo(0, WINDOW_HEIGHT);
+    ctx.closePath();
+    ctx.stroke();
+    
+    // 特别强调底部边框，确保最后一行清晰可见
+    ctx.strokeStyle = '#2a3142';  // 稍微亮一点的颜色
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, WINDOW_HEIGHT);
+    ctx.lineTo(WINDOW_WIDTH, WINDOW_HEIGHT);
+    ctx.stroke();
 }
 
 // 绘制食物
@@ -341,15 +371,6 @@ function gameLoop(timestamp) {
         moveSnake();
         moveTimer = timestamp;
         
-        // 碰撞检测-边界检测
-        if (headPos[0] < 0 || headPos[0] >= WINDOW_WIDTH) {
-            gameOver();
-            return;
-        }
-        if (headPos[1] < 0 || headPos[1] >= WINDOW_HEIGHT) {
-            gameOver();
-            return;
-        }
         // 碰撞检测-蛇体检测
         for (let i = 1; i < bodyPos.length; i++) {
             if (headPos[0] === bodyPos[i][0] && headPos[1] === bodyPos[i][1]) {
